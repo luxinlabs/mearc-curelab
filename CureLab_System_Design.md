@@ -28,7 +28,7 @@ flowchart LR
 
 The existing 3D viewer is retained. The proposed new gesture controls and broad workspace redesign are deferred at the user's request.
 
-Discussion narration now segments complete committed message text into at most 3,500-character parts. The server validates the requested part and returns its total in `X-Speech-Parts`; the browser fetches and plays each segment sequentially before advancing to the next scientist. Each segment rechecks pause and guidance revision. Interrupts cancel in-flight audio and remaining segments; updated human guidance stops older narration. Audio start failures reject correctly, and failed previews no longer announce success. Independent proposals remain silent; the UI explains the wait. The feature remains buffered turn-based speech, not full-duplex Realtime audio.
+Discussion narration summarizes each committed shared turn into one or two short sentences using the configured OpenAI Responses model, then synthesizes only that summary. The full message and peer context are unchanged. Summary output is validated (maximum two sentences, 65 words and 500 characters), cached by message content/revision/model in a bounded 256-entry memory cache, and included in the voice audit event with model/request ID. A failure never falls back to reading the entire message. Pause/revision checks run before summarization, before synthesis and before delivery. Interrupts still cancel in-flight work. The existing one-part audio response remains compatible with the browser playback queue. This is buffered turn-based speech, not full-duplex Realtime audio.
 
 ### Message path and responsibilities
 
