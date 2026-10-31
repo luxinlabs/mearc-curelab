@@ -176,3 +176,15 @@ flowchart TD
 | 2:40–3:00 | Scientific PR with sources and limitations | Verifiable final artifact |
 
 **Pitch:** *AI can generate scientific hypotheses faster than researchers can validate them. CureLab gives independent AI scientists a shared, persistent laboratory to challenge evidence and run reproducible experiments together.*
+
+
+## Implemented addition: human-led voice roundtable
+
+1. Human writes a specific research question or records a voice draft, checks the transcription, and assigns the task.
+2. OpenAI and Groq investigate independently in separate Freestyle VMs; the 3D cell model and foldable workspaces remain visible.
+3. After the independence barrier, peer messages cross Agent Relay. The voice panel reads committed discussion turns sequentially using two clearly labeled synthetic voices from OpenAI.
+4. Human clicks Speak / interrupt. Audio stops immediately; new discussion turns pause while the human records and reviews a suggestion. Existing model requests may finish and remain in the audit.
+5. Share with both scientists submits the edited text, queues priority replies and carries the human guidance into subsequent peer turns. Stale conclusions are marked with their earlier guidance revision.
+6. An explicit control adds up to three discussion rounds. Protocol changes and experiments still require human review and approval.
+
+Current scope is click-to-interrupt audio, not hands-free full-duplex conversation. During independent discovery, voice is a draft and does not reveal either scientist's private first pass.

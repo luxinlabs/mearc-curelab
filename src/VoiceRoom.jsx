@@ -1,0 +1,53 @@
+import {VoicePlayer} from './voice-player.mjs';
+import React,{useEffect,useRef,useState} from 'react';
+const spoken=m=>['OpenAI','Groq'].includes(m.sender)&&['critique','discussion','reply'].includes(m.type);
+export default function VoiceRoom({mission,session,onTask}){
+ const [enabled,setEnabled]=useState(false),[rounds,setRounds]=useState(0),[speaker,setSpeaker]=useState(''),[status,setStatus]=useState('Click Listen to enable sound, or test either voice below'),[error,setError]=useState(''),[recording,setRecording]=useState(false),[working,setWorking]=useState(false),[text,setText]=useState('');
+ const live=useRef({}),runtime=useRef({epoch:0,seen:new Set(),playing:false,stream:null,recorder:null,timer:null,controller:null,player:null,roundPending:false});
+ live.current={mission,enabled,rounds};const available=session?.voice?.enabled;
+ const post=async(path,body={},options={})=>{const r=await fetch(`/api/missions/${mission.id}${path}`,{method:'POST',headers:{'x-curelab-session':session.token,'Content-Type':'application/json'},body:JSON.stringify(body),...options});if(!r.ok){const d=await r.json();throw Error(d.error||'Voice request failed');}return r;};
+ function silence(){const x=runtime.current;x.epoch++;x.controller?.abort();x.controller=null;x.player?.stop();x.playing=false;}
+ function stopListening(){silence();setEnabled(false);setRounds(0);setSpeaker('');setStatus('Audio stopped');}
+ useEffect(()=>()=>{silence();const x=runtime.current;x.player?.close();clearTimeout(x.timer);if(x.recorder){x.recorder.onstop=null;if(x.recorder.state!=='inactive')x.recorder.stop();}x.stream?.getTracks().forEach(t=>t.stop());},[]);
+ useEffect(()=>{if(mission.discussionPaused&&runtime.current.playing){silence();setSpeaker('');}},[mission.discussionPaused]);
+ useEffect(()=>{
+  const x=runtime.current;if(!enabled||mission.discussionPaused||recording||working||x.playing)return;
+  const next=mission.messages.find(m=>spoken(m)&&!x.seen.has(m.id)&&(m.guidanceRevision||0)>=(mission.guidanceRevision||0));
+  if(next){x.playing=true;x.seen.add(next.id);const epoch=x.epoch;const controller=new AbortController();x.controller=controller;setSpeaker(next.sender);setStatus(`Preparing ${next.sender}’s voice…`);
+   (async()=>{try{const r=await post('/voice/speech',{messageId:next.id},{signal:controller.signal});const bytes=await r.arrayBuffer();if(epoch!==x.epoch)return;await x.player.play(bytes,()=>setStatus(`${next.sender} is speaking`));}
+    catch(e){if(epoch===x.epoch){x.seen.delete(next.id);setError(e.message);setEnabled(false);setRounds(0);}}
+    finally{if(epoch===x.epoch){x.controller=null;x.playing=false;setSpeaker('');setStatus('Listening for the next scientist turn');}}
+   })();return;
+  }
+  if(rounds>0&&!x.roundPending&&!mission.jobs.some(j=>['pending','running','failed'].includes(j.status))&&!['READY','DISCOVERY','CROSS_REVIEW'].includes(mission.phase)){
+   x.roundPending=true;setRounds(n=>Math.max(0,n-1));setStatus('Scientists are preparing the next exchange…');post('/discuss').catch(e=>{setError(e.message);setRounds(0);}).finally(()=>{x.roundPending=false;});
+  }
+ },[mission,enabled,rounds,speaker,status,recording,working]);
+ async function unlock(){const x=runtime.current;x.player??=new VoicePlayer();await x.player.unlock();}
+ async function listen(auto=false){setError('');try{await unlock();}catch(e){setError(e.message);return;}const x=runtime.current;const messages=mission.messages.filter(spoken);const recent=new Set(messages.slice(-2).map(m=>m.id));for(const m of messages)if(!recent.has(m.id))x.seen.add(m.id);setEnabled(true);setRounds(auto?3:0);setStatus('Listening for scientist turns');}
+ async function record(){
+  stopListening();setError('');setWorking(true);const x=runtime.current,epoch=x.epoch;
+  try{if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw Error('Microphone recording requires HTTPS or localhost and a supported browser.');const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});if(epoch!==x.epoch){stream.getTracks().forEach(t=>t.stop());return;}x.stream=stream;
+   if(!['READY','DISCOVERY'].includes(mission.phase))await post('/voice/pause');if(epoch!==x.epoch){stream.getTracks().forEach(t=>t.stop());return;}
+   const mime=['audio/webm;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));if(!mime)throw Error('This browser has no supported recording format. Type your suggestion instead.');
+   const recorder=new MediaRecorder(stream,{mimeType:mime}),chunks=[];x.recorder=recorder;
+   recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+   recorder.onstop=async()=>{clearTimeout(x.timer);stream.getTracks().forEach(t=>t.stop());x.stream=null;setRecording(false);setWorking(true);setStatus('Transcribing your suggestion…');const controller=new AbortController();x.controller=controller;
+    try{const blob=new Blob(chunks,{type:mime});if(blob.size>8*1024*1024)throw Error('Recording too large. Please use a shorter suggestion.');const r=await post('/voice/transcribe',null,{headers:{'x-curelab-session':session.token,'Content-Type':mime},body:blob,signal:controller.signal});const data=await r.json();if(epoch!==x.epoch)return;setText(data.text);setStatus('Review your words, then share them with both scientists');}catch(e){if(epoch===x.epoch)setError(e.message);}finally{if(epoch===x.epoch){setWorking(false);x.controller=null;}}
+   };
+   recorder.onerror=()=>{setError('Microphone recording failed. You can type your suggestion.');if(recorder.state!=='inactive')recorder.stop();};
+   recorder.start();setRecording(true);setStatus('Your turn · recording, up to 45 seconds');x.timer=setTimeout(()=>{if(recorder.state!=='inactive')recorder.stop();},45000);
+  }catch(e){x.stream?.getTracks().forEach(t=>t.stop());x.stream=null;setError(e.message);}finally{if(epoch===x.epoch)setWorking(false);}
+ }
+ async function submit(){if(available)try{await unlock();}catch(e){setError(e.message);return;}setWorking(true);setError('');try{if(mission.phase==='READY')await onTask(text.trim());else{const prior=live.current.mission.messages.map(m=>m.id);await post('/messages',{content:text.trim()});for(const id of prior)runtime.current.seen.add(id);setText('');setEnabled(true);setStatus('Your guidance is queued for both scientists');}}catch(e){setError(e.message);}finally{setWorking(false);}}
+ async function resume(){setWorking(true);setError('');try{await unlock();await post('/voice/resume');setEnabled(true);setStatus('Discussion resumed');}catch(e){setError(e.message);}finally{setWorking(false);}}
+ async function preview(provider){stopListening();setWorking(true);setError('');const x=runtime.current,epoch=x.epoch;try{await unlock();if(epoch!==x.epoch)return;const controller=new AbortController();x.controller=controller;setSpeaker(provider);setStatus(`Preparing ${provider} voice preview…`);const r=await post('/voice/preview',{provider},{signal:controller.signal});const bytes=await r.arrayBuffer();if(epoch!==x.epoch)return;await x.player.play(bytes,()=>setStatus(`${provider} voice preview`));}catch(e){if(epoch===x.epoch)setError(e.message);}finally{if(epoch===x.epoch){x.controller=null;setWorking(false);setSpeaker('');setStatus('Preview finished. Click Listen to hear the discussion.');}}}
+ return <section className={`voice-room ${speaker?'is-speaking':''}`} aria-label="Voice research discussion">
+  <div className="voice-room-top"><div><span className="micro-label">HUMAN + TWO SCIENTISTS</span><h3>{mission.phase==='READY'?'Give the lab a specific task':'Research roundtable'}</h3></div><span className="voice-disclosure">AI-generated voices · OpenAI audio</span></div>
+  <div className="voice-participants">{['OpenAI','Groq','You'].map(name=><div key={name} className={(speaker===name||(name==='You'&&recording))?'speaking':''}><span className="voice-orb">{name==='OpenAI'?'◎':name==='Groq'?'g':'PI'}</span><strong>{name}</strong><small>{name==='You'?'Research direction':session?.voice?.voices?.[name]||'Synthetic voice'}</small>{name!=='You'&&<button className="voice-preview" disabled={!available||working||recording} onClick={()=>preview(name)}>▶ Test voice</button>}<span className="voice-waves" aria-hidden="true">▂ ▅ ▃ ▇ ▂</span></div>)}</div>
+  <div className="voice-controls"><button disabled={!available||working||recording||mission.discussionPaused} onClick={()=>enabled?stopListening():listen()}>{enabled?'Stop audio':'Listen to discussion'}</button><button disabled={!available||working||recording||mission.phase==='READY'||mission.discussionPaused} onClick={()=>listen(true)}>Discuss for 3 more rounds</button><button className="voice-interrupt" disabled={!available||working} onClick={()=>recording?runtime.current.recorder?.stop():record()}>{recording?'Finish speaking':'● Speak / interrupt'}</button>{mission.discussionPaused&&<button disabled={working||recording} onClick={resume}>Resume without a note</button>}</div>
+  <p role="status" className="voice-status">{!available?'Voice is off. Enable it in server configuration; text research is still available.':mission.discussionPaused&&!recording&&!working?'Your turn. New agent turns are paused; an existing request may finish.':status}</p>
+  {(mission.phase==='READY'||text||mission.discussionPaused)&&<form className="voice-task" onSubmit={e=>{e.preventDefault();submit();}}><label htmlFor={`voice-task-${mission.id}`}>{mission.phase==='READY'?'Specific research task':'Your suggestion · edit the transcript before sending'}</label><textarea id={`voice-task-${mission.id}`} value={text} maxLength={mission.phase==='READY'?500:2000} onChange={e=>setText(e.target.value)} placeholder="Compare whether a simulated 20 µM candidate improves β-cell secretion at 11 mM glucose without reducing viability. Identify controls and evidence gaps."/><div><small>{mission.phase==='DISCOVERY'?'Both independent reports must finish before advice can be shared.':'Suggestions guide discussion; experiments still require approval.'}</small><button disabled={working||recording||mission.phase==='DISCOVERY'||text.trim().length<(mission.phase==='READY'?10:1)}>{mission.phase==='READY'?'Assign task & start':'Share with both scientists'}</button></div>{mission.phase==='READY'&&<button type="button" className="task-example" onClick={()=>setText('Compare whether a simulated 20 µM candidate improves pancreatic β-cell secretion at 11 mM glucose without reducing viability. Propose matched vehicle and positive controls, identify evidence gaps, and preserve disagreements. No clinical efficacy claims.')}>Use this concrete example</button>}</form>}
+  {error&&<p className="voice-error" role="alert">{error}</p>}
+ </section>;
+}

@@ -51,7 +51,7 @@ OpenAI uses the [Responses endpoint](https://developers.openai.com/api/reference
 - The executable scientific pipeline is **a deterministic synthetic assay**, not a public-data reanalysis or physical wet-lab experiment. Its assumptions are encoded explicitly in `server/simulator.mjs`. A positive result validates software behavior, not a candidate therapy.
 - Source cards link to GSE81608, GSE41762, and ChEMBL as **proposed sources**. No datasets have been downloaded or analyzed. They are not falsely labeled as evidence-backed findings.
 - Charts show model-generated temporal curves. Approximate intervals describe synthetic replicate noise; they are not biological confidence estimates. The cell-signaling network does not provide inferred probabilities.
-- **Agent Relay and Terse are not connected or implemented as the active runtime.** This local implementation uses real IPC worker messaging plus SQLite durability. It does not satisfy the sponsor-integration acceptance criteria in the original system design. See `IMPLEMENTATION_STATUS.md` for the remaining work. Provider credentials alone do not enable those sponsor services.
+- **Agent Relay** routes peer context when `CURELAB_TRANSPORT=agent-relay`; configure its URL and API key separately. **Terse is not connected.** SQLite remains authoritative. See the Relay setup below and system design §0.
 - Local human control uses a per-server session token and same-origin mutation checks. This is not multi-user authentication or production RBAC.
 - A replication request is persisted as a review decision; it does not automatically execute another experiment. Create and approve a new protocol to run the next iteration.
 
@@ -84,7 +84,7 @@ New missions use OpenAI + Groq. Existing missions retain their historical provid
 
 The human research desk starts a mission from a question, sends follow-up requests to both scientists after the independence barrier, and extracts explicitly stated dose/glucose/well/seed values into the reviewable protocol form. It is a deterministic parameter helper, not an LLM planner. Responses appear in the desk and full research room. No chat message bypasses experiment approval.
 
-The execution trace displays real persisted job phases, statuses, completed task counts, process IDs, and the current sharing barrier. Transport remains local IPC with SQLite persistence; Agent Relay is not installed or active.
+The execution trace displays real persisted job phases, statuses, completed task counts, process IDs, and the current sharing barrier. Task transport is Freestyle exec or local IPC. Peer critique/discussion context crosses the official Agent Relay broker when enabled, with receipt logs and no silent local fallback.
 
 ## OpenEvidence access review — October 31, 2026
 
@@ -119,3 +119,43 @@ References: https://www.freestyle.sh/docs/vms and https://api.freestyle.sh/opena
 The shared discussion excludes independent proposals and result reports; those are shown inside each agent's expandable workspace. Each workspace, VM/job section, report, log section and paper desk can be folded independently. Basic Markdown formatting is rendered as safe React elements, never raw HTML.
 
 After independently committing proposals, each scientist sends a peer-addressed critique. Both then receive the other scientist's specific critique and send a reply referencing its message ID. Only after that bounded exchange is the initial protocol presented for approval. “Continue agent discussion” requests one additional exchange using the latest peer message, without executing experiments. Duplicate pending rounds are rejected. The local orchestrator routes these messages between the separate Freestyle workers; the shared UI is not a third model or an additional VM. Existing report authors and content are preserved. Restart the backend to upload the updated worker code when VMs reconnect.
+
+
+## Agent Relay track
+
+Peer messages use the official Agent Relay **7.1.1** broker HTTP API. OpenAI and Groq retain separate compute VMs; the orchestrator bridges their mission-scoped broker mailboxes. Broker queue receipts are visible on replies and in each agent's expandable logs. A receipt on a reply describes its **incoming peer context**.
+
+On a dedicated Node host, install `agent-relay@7.1.1` globally, copy `scripts/relay-host.mjs`, and run it from a persistent private working directory. The script resolves the bundled SDK, creates/reuses its Relaycast workspace, starts the authenticated broker on port 3888 and renews its lease. Keep this process supervised. Publish port 3888 through HTTPS (Freestyle TLS ingress is supported).
+
+Copy the broker access token from the host's `.agent-relay/connection.json` `api_key` into the application's `.env` as `RELAY_BROKER_API_KEY`; set `RELAY_BROKER_URL` and `CURELAB_TRANSPORT=agent-relay`, then restart CureLab. Never commit either credential file. A full SDK restart generates a new broker token; update `.env` then. VM pause/resume preserves a running process. Provider keys are not required on the broker VM.
+
+Start a mission and inspect `RELAY_SEND` → `RELAY_RECEIVED` → `RELAY_DELIVERY_CONFIRMED`. Independent drafts are never shared before both finish. An unavailable broker fails the peer job; Resume retries it. Human notes and independent result reviews still use normal task transport. `CURELAB_TRANSPORT=local` explicitly selects offline/local messaging and must not be presented as Relay evidence.
+
+The pending queue is volatile and bounded to 256 messages per mailbox. Retries check job IDs before sending, but a broker restart can cause a resend; no exactly-once or distributed-outbox guarantee is claimed. This is a single-orchestrator prototype. The relay adapter validates identities and payloads before passing received text to the scientist VM.
+
+Real bidirectional broker verification and its limits are recorded in [AGENT_RELAY_VERIFICATION.md](AGENT_RELAY_VERIFICATION.md). Run `node --env-file=.env scripts/verify-relay.mjs` to repeat it from a network-enabled local machine; sanitized receipts are saved under ignored `data/`. Restart the local app after changing `.env`. Existing missions retain their selected transport; start a new mission to select Relay after running a local-mode mission.
+
+
+## Voice research roundtable
+
+Every mission includes a voice panel. Enter a **specific task** (or record and review one), then assign it to the scientists. Click **Listen to discussion** to hear new critiques, replies and discussion turns in two distinct OpenAI synthetic voices. **Discuss for 3 more rounds** requests a bounded continuation; it never runs an experiment.
+
+Click **Speak / interrupt** to stop narration and record your suggestion. The microphone closes after **Finish speaking** or 45 seconds. Review/edit the transcription and select **Share with both scientists**. Both agents receive priority reply tasks and subsequent turns include your advice. **Resume without a note** releases the discussion pause. During independent discovery, recording drafts advice without pausing the independent-report barrier.
+
+This is click-to-interrupt, turn-based audio. It is not hands-free VAD/full-duplex speech. Existing model calls may finish while new turns are paused. Their earlier guidance revision stays in the audit record; stale turns are not automatically spoken. Speech is buffered before playback, so provider latency is visible. Switching missions stops local audio and the microphone; a durable discussion pause must be resumed when returning.
+
+Configuration (already added to `.env.example`; use the existing OpenAI key):
+
+```dotenv
+CURELAB_VOICE=true
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TRANSCRIBE_MODEL=gpt-transcribe
+OPENAI_SCIENTIST_VOICE=nova
+GROQ_SCIENTIST_VOICE=onyx
+```
+
+Voice APIs are disabled in demo mode. Keys stay on the server; recorded audio is not saved to disk. Use localhost or HTTPS for microphone access. Text task entry and chat continue to work without voice.
+
+**Audio model lifecycle:** OpenAI has scheduled the Speech API TTS models to retire on January 6, 2027. This verified hackathon implementation uses that still-supported endpoint. Migrate synthesis to the Realtime API before that date; `gpt-realtime-2.1-mini` cannot be substituted into `/audio/speech`. See [official speech documentation](https://developers.openai.com/api/docs/guides/text-to-speech).
+
+Voice playback is unlocked on the Listen/Test voice click before the synthesis request begins, avoiding delayed autoplay blocking. Use each scientist’s **Test voice** button to check output without starting research. The selected mapping is OpenAI → `nova` (feminine-sounding), Groq → `onyx` (masculine-sounding). Restart the backend after changing voice configuration, then refresh the page.

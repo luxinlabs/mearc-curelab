@@ -1,14 +1,89 @@
 # CureLab — Staff Engineer System Design
 
-**Version:** 1.0 | **Date:** 2026-10-31  
+**Version:** 1.2 | **Date:** 2026-10-31
 **Context:** YC Haunted Hacks 2026; first research mission is Type 2 Diabetes drug repurposing and β-cell function.  
-**Status:** Proposed architecture; SDK APIs, data availability, and vendor capabilities must be verified against pinned versions before implementation.
+**Status:** Current implementation is described in §0. Sections 1–18 retain the broader target architecture; Terse actors and distributed guarantees there are future work.
+
+## 0. Implemented architecture — Agent Relay track
+
+The active app uses React/Vite, Express and SQLite. OpenAI and Groq execute in separate Freestyle VMs. A third Freestyle VM hosts the official **Agent Relay 7.1.1 broker**, initialized through its bundled SDK. It is a messaging host, not an additional scientist. Terse is **not integrated**; SQLite is the authoritative mission store.
+
+```mermaid
+flowchart LR
+  PI[Human research chat / session] --> UI[React dashboard + 3D cells]
+  UI --> API[Express orchestrator]
+  API <--> DB[(SQLite snapshots + audit + queued jobs)]
+  API <--> OA[Freestyle VM: OpenAI scientist]
+  API <--> GQ[Freestyle VM: Groq scientist]
+  API -->|Peer envelope: from / to / job ID| R[Official Agent Relay broker VM]
+  R -->|Recipient pending queue: received payload| API
+  API -->|Received peer context| OA
+  API -->|Received peer context| GQ
+  API --> SIM[Approved seeded synthetic assay]
+```
+
+### Message path and responsibilities
+
+1. Both scientists finish independent proposals before either receives a peer report.
+2. A durable critique/discussion job identifies a committed peer message with `replyTo`. The orchestrator acts as the two workers' transport adapter; it sends a versioned envelope through authenticated `POST /api/send` using mission-scoped sender and recipient names.
+3. Broker identities use `/bin/cat` mailbox harnesses in `manual_flush` mode. These are transport endpoints, **not the model processes**. The models remain in their dedicated VMs. This is an orchestrator-mediated Relay bridge, not a direct VM-to-VM socket.
+4. The adapter reads the recipient's actual `/pending` queue. It validates mission, job, source message, sender, recipient and content. Only the received body is assembled into the model's peer context. Failed or mismatched delivery blocks that job; there is no silent local fallback.
+5. SQLite records the receipt before dispatch: job ID, sender, recipient, broker event ID when supplied, queue timestamp and application receive time. The UI attaches the receipt to the **reply's incoming context**, not a claim that the reply itself has already reached the peer. When selected for the next exchange, that reply traverses Relay in turn.
+6. Retries inspect the pending queue before sending again. Broker queue entries are memory-only and bounded; restart can require resending the same job envelope. Durable jobs and source messages live in SQLite. This does **not** provide distributed exactly-once delivery or a transactional vendor outbox.
+
+`CURELAB_TRANSPORT=agent-relay` selects this path; `local` is explicitly available for offline demos. Freestyle exec remains the task/result transport. Human notes and independent artifact review jobs are orchestrator fan-out; they are not labeled as Relay-delivered. The main room shows critiques and direct replies; independent reports, VM details, paper abstracts and structured logs remain in foldable workspaces.
+
+### Configuration and operations
+
+`RELAY_BROKER_URL` must use HTTPS for remote hosts; `RELAY_BROKER_API_KEY` stays only on the orchestrator. The SDK manages its separate Relaycast workspace credentials on the broker VM. Provider credentials stay in their respective scientist VMs. Never expose `/api/config` or connection files without authentication. See `scripts/relay-host.mjs` and README for deployment and verification. Retain the broker's workspace directory across restarts; the SDK generates a new broker access token when starting a new process, so update the application's key after a full restart.
+
+Acceptance evidence for the Agent Relay track is a real two-way broker round trip plus mission audit entries `RELAY_SEND`, `RELAY_RECEIVED`, and `RELAY_DELIVERY_CONFIRMED`. Mock tests alone are not sponsor integration evidence. The real broker round trip was verified on 2026-10-31; see `AGENT_RELAY_VERIFICATION.md` for receipt IDs and scope. Queue receipt means the bridge read the message, not that a model agreed with it. Freestyle VM availability, broker availability and provider API success are distinct checks.
+
+Official references: [Agent Relay broker API](https://agentrelay.com/docs/7.1.1/reference-broker-api), [custom harnesses](https://agentrelay.com/docs/7.1.1/harnesses).
+
+### Voice research roundtable (implemented)
+
+A human supplies a concrete research task in text or by recording a voice draft, reviews it, and starts a mission. OpenAI and Groq remain separate scientific agents; both use OpenAI audio synthesis for presentation. Their shared **text** still crosses Agent Relay. They do not transcribe each other's synthesized audio, and audio is never the authoritative scientific record.
+
+```mermaid
+sequenceDiagram
+  participant PI as Human
+  participant UI as Voice roundtable
+  participant API as Orchestrator
+  participant O as OpenAI audio API
+  participant W as OpenAI / Groq VM workers
+  PI->>UI: Specific research task
+  UI->>API: Create and start mission
+  API->>W: Independent research, then Relay-backed peer turns
+  W-->>API: Committed text statements
+  UI->>API: Speak committed message ID
+  API->>O: Text to speech (nova / onyx)
+  O-->>UI: Audio via server
+  PI->>UI: Click Speak / interrupt
+  UI->>UI: Stop playback, discard queued audio
+  UI->>API: Pause new agent dispatch
+  PI->>UI: Record suggestion (maximum 45 seconds)
+  UI->>O: Transcription through server
+  O-->>UI: Editable transcript
+  PI->>API: Submit reviewed guidance
+  API->>W: Priority replies + updated humanGuidance
+```
+
+- `CURELAB_VOICE=true` enables live-only OpenAI audio. Server credentials never reach the browser. Explicit listening/recording controls gate audio use; voices are disclosed as AI-generated.
+- `OPENAI_TTS_MODEL=gpt-4o-mini-tts` with `nova` (feminine-sounding) for OpenAI and `onyx` (masculine-sounding) for Groq; `OPENAI_TRANSCRIBE_MODEL=gpt-transcribe`. These are configurable independently from scientific model IDs. This is a turn-based Speech API implementation, with buffered MP3 playback and file transcription, **not a full-duplex Realtime session or hands-free VAD interruption**.
+- Pressing Speak stops playback immediately. Once microphone access succeeds, active discussion dispatch is paused durably. Already-running model requests may finish; they are not falsely described as canceled. Microphone tracks close after stopping, failure or navigation. Initial independent research continues during voice drafting so the sharing barrier cannot deadlock.
+- Submitting reviewed advice increments `guidanceRevision`, resumes dispatch and prioritizes a reply from both scientists. Every subsequent dispatched job receives all submitted human guidance. Replies retain the revision they used. Outputs from an earlier revision remain auditable but are not automatically spoken as current. Pausing while awaiting Relay also prevents subsequent model dispatch.
+- Up to three explicitly requested additional discussion rounds run while listening. There is no unbounded autonomous voice loop. Stop audio ends local narration/automatic round scheduling; Resume without a note releases a durable human pause.
+- Transcription does not submit advice by itself. Human advice does not approve, modify or execute an experiment. Immutable protocol approval is unchanged. An uploaded recording is processed in memory (8 MB cap); audio is not stored as a research artifact. Transcript text is persisted only after human submission; activity logs record audio request IDs and message IDs.
+- The browser requires microphone permission and localhost/HTTPS. Capability failures remain visible and text entry stays available. Per-session audio requests are serialized; disconnects abort upstream requests.
+
+Compatibility note: official OpenAI documentation schedules the Speech API TTS models for shutdown on **2027-01-06** and directs migration to `gpt-realtime-2.1-mini` over Realtime. That migration requires a new transport implementation, not merely changing the model string on `/audio/speech`. The current hackathon integration uses the verified, still-operational Speech API. References: [speech](https://developers.openai.com/api/docs/guides/text-to-speech), [transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
 
 ## 1. Executive summary
 
-CureLab is a **persistent multi-provider scientific research runtime**. OpenAI- and Anthropic-backed scientist workers investigate independently, collaborate over **Agent Relay**, execute authorized analysis/simulation through a trusted Scientific Tool Gateway, and coordinate durable mission/experiment state through **Terse Durable Actors**. Scientific evidence is versioned outside actor state. Human review and evidence provenance are first-class.
+CureLab is a **persistent multi-provider scientific research runtime**. OpenAI- and Groq-backed scientist workers investigate independently, collaborate over **Agent Relay**, execute authorized analysis/simulation through a trusted Scientific Tool Gateway, and coordinate durable mission/experiment state through **Terse Durable Actors**. Scientific evidence is versioned outside actor state. Human review and evidence provenance are first-class.
 
-**Non-goals:** Claiming discovery of a T2D cure; clinical recommendations; executing real wet-lab experiments in the MVP; training a new drug model; unrestricted access to private ChatGPT/Claude sessions.
+**Non-goals:** Claiming discovery of a T2D cure; clinical recommendations; executing real wet-lab experiments in the MVP; training a new drug model; unrestricted access to private ChatGPT/Groq sessions.
 
 ### Architecture invariants
 
@@ -47,7 +122,7 @@ flowchart TB
     ORCH <--> RELAY[Agent Relay: channels, messages, inbox]
     ORCH <--> ACTORS[Terse Durable Actors: MissionActor / ExperimentActor]
     RELAY <--> OPENAI[OpenAI Scientist Worker]
-    RELAY <--> CLAUDE[Anthropic Scientist Worker]
+    RELAY <--> CLAUDE[Groq Scientist Worker]
     OPENAI --> GATE[Scientific Tool Gateway]
     CLAUDE --> GATE
     GATE --> GEO[Curated GEO / Scanpy analysis]
@@ -141,7 +216,7 @@ sequenceDiagram
     participant H as Human PI
     participant O as Orchestrator
     participant A as OpenAI Scientist
-    participant C as Claude Scientist
+    participant C as Groq Scientist
     participant R as Agent Relay
     participant X as ExperimentActor
     participant W as Execution Worker
@@ -266,7 +341,7 @@ Agent worker process terminated
   -> resume research task and publish new review
 ```
 
-**Demo requirement:** Kill the actual OpenAI worker process, not just the UI avatar. Show Claude receiving new evidence, restart OpenAI, and prove it responds to information committed while it was offline. Replay a prior command and demonstrate no duplicate committed experiment.
+**Demo requirement:** Kill the actual OpenAI worker process, not just the UI avatar. Show Groq receiving new evidence, restart OpenAI, and prove it responds to information committed while it was offline. Replay a prior command and demonstrate no duplicate committed experiment.
 
 ## 10. API and messaging contracts
 
@@ -348,7 +423,7 @@ MVP acceptance tests: distinct provider requests; independent first-pass proposa
 |---|---|---|
 | Frontend | Next.js / React / Tailwind | Same + role-aware UI |
 | BFF/orchestrator | TypeScript / Zod | Separate scalable services |
-| Agent workers | OpenAI + Anthropic SDKs | Provider-agnostic adapters |
+| Agent workers | OpenAI + Groq SDKs | Provider-agnostic adapters |
 | Messaging | Agent Relay | Authenticated cross-org relay |
 | Workflow state | Terse Durable Actors | Versioned actor contracts and recovery |
 | Scientific analysis | Python / pandas / scipy / Scanpy as needed | Isolated job workers and reproducible containers |
@@ -394,7 +469,7 @@ flowchart TD
     UI[Human Researcher / CureLab UI] --> API[API + Research Orchestrator]
     API --> R[Agent Relay Broker / Mission Channel]
     R <--> O[OpenAI Scientist Worker]
-    R <--> C[Claude Scientist Worker]
+    R <--> C[Groq Scientist Worker]
     API <--> M[MissionActor — Terse Durable Actors]
     API <--> E[ExperimentActor — Terse Durable Actors]
     O --> G[Trusted Scientific Tool Gateway]
@@ -443,7 +518,7 @@ sequenceDiagram
     participant H as Human
     participant R as Agent Relay
     participant O as OpenAI Scientist
-    participant C as Claude Scientist
+    participant C as Groq Scientist
     participant A as Durable ExperimentActor
     participant X as Scientific Worker
     H->>R: Create mission / invite scientists
@@ -475,7 +550,7 @@ sequenceDiagram
 
 Terse official quickstart (https://docs.useterse.ai/quickstart) documents Bun, `bunx terse-cli@latest install`, `terse init`, `terse actor dev`, `terse actor generate`, `terse deploy`, `@Persisted`, `@Emittable`, and generated actor clients. Begin from the **official template**, adapt its persisted fields, and regenerate the client after actor changes. Do not assume Cloudflare Durable Objects APIs are identical to Terse SDK APIs.
 
-Agent Relay TypeScript SDK reference (https://agentrelay.com/docs/typescript-sdk) documents `npm install @agent-relay/sdk`, `AgentRelay`, `spawnAgent`, `sendMessage`, `human`, `addListener('agentExited', ...)`, and broker messaging. For true cross-provider independence, use separate OpenAI and Anthropic model-backed workers (or supported CLI harnesses) and verify that both are actually sending/receiving via the Relay broker. Avoid a mock `relay` facade that only updates local React state.
+Agent Relay TypeScript SDK reference (https://agentrelay.com/docs/typescript-sdk) documents `npm install @agent-relay/sdk`, `AgentRelay`, `spawnAgent`, `sendMessage`, `human`, `addListener('agentExited', ...)`, and broker messaging. For true cross-provider independence, use separate OpenAI and Groq model-backed workers (or supported CLI harnesses) and verify that both are actually sending/receiving via the Relay broker. Avoid a mock `relay` facade that only updates local React state.
 
 **Suggested P0 implementation order:**
 1. Start a real Terse actor; prove persisted mission/experiment state survives a client or worker restart.
@@ -490,7 +565,7 @@ Agent Relay TypeScript SDK reference (https://agentrelay.com/docs/typescript-sdk
 | Test | Pass condition | Proof on screen |
 |---|---|---|
 | Both sponsor products | Actual Terse actor calls AND Agent Relay broker messages | Logs/IDs from both systems |
-| Cross-provider | OpenAI and Claude have separate real model invocations | Distinct worker/process identities and responses |
+| Cross-provider | OpenAI and Groq have separate real model invocations | Distinct worker/process identities and responses |
 | Persistence | Experiment remains in correct state after worker termination | Same `experimentId`, protocol version, checkpoints |
 | Recovery | Restarted worker reasons over evidence created while offline | New post-restart critique referencing artifact ID |
 | Idempotency | Resend same completion event twice | One committed result/artifact reference |

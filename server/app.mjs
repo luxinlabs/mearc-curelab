@@ -1,3 +1,4 @@
+import {installVoiceRoutes,voiceConfig} from './voice.mjs';
 import express from 'express';
 import { z } from 'zod';
 import { resolve, join } from 'node:path';
@@ -5,13 +6,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { Lab, providers } from './lab.mjs';
 export function createApplication({port=3000,dir=resolve('data')}={}) {
-function verification(){try{return JSON.parse(readFileSync(join(dir,'runtime-verification.json'),'utf8'));}catch{return null;}}
+function verification(file='runtime-verification.json'){try{return JSON.parse(readFileSync(join(dir,file),'utf8'));}catch{return null;}}
 const app=express(),streams=new Map(),token=randomBytes(32).toString('hex');
 app.use(express.json({limit:'32kb'}));
 app.use('/api',(req,res,next)=>{res.set('Cache-Control','no-store');if(!['GET','HEAD'].includes(req.method)){if(req.get('x-curelab-session')!==token)return res.status(403).json({error:'Local PI session required. Reload the page.'});if(req.get('origin')&&!new Set([`http://localhost:${port}`,`http://127.0.0.1:${port}`]).has(req.get('origin')))return res.status(403).json({error:'Origin not allowed'});}next();});
 const lab=new Lab(dir,id=>{for(const res of streams.get(id)||[])res.write(`data: ${JSON.stringify(lab.snapshot(id))}\n\n`);});
 if(!lab.missions.size||[...lab.missions.values()].at(-1).agents.some(a=>!providers.includes(a.name)))lab.create();lab.recover();
-app.get('/api/session',(req,res)=>res.json({token,runtimeVerification:verification(),mode:process.env.CURELAB_MODE!=='demo'?'live':'demo',models:{OpenAI:process.env.OPENAI_MODEL||null,Groq:process.env.GROQ_MODEL||null},integrations:{storage:'SQLite · local durable state',transport:process.env.CURELAB_RUNTIME==='freestyle'?'Freestyle VMs · polled task events':'Local IPC · persisted messages',terse:'Not connected',relay:'Not connected',OpenAI:process.env.CURELAB_MODE!=='demo'?'Live provider':'Demo scientist',Groq:process.env.CURELAB_MODE!=='demo'?'Live provider':'Demo scientist'}}));
+app.get('/api/session',(req,res)=>res.json({token,voice:voiceConfig(),runtimeVerification:verification(),relayVerification:verification('relay-verification.json'),mode:process.env.CURELAB_MODE!=='demo'?'live':'demo',models:{OpenAI:process.env.OPENAI_MODEL||null,Groq:process.env.GROQ_MODEL||null},integrations:{storage:'SQLite · local durable state',transport:process.env.CURELAB_RUNTIME==='freestyle'?'Freestyle VMs · polled task events':'Local IPC · persisted messages',terse:'Not connected',relay:process.env.CURELAB_TRANSPORT==='agent-relay'?'Agent Relay · required for peer delivery (see delivery logs)':'Not configured',OpenAI:process.env.CURELAB_MODE!=='demo'?'Live provider':'Demo scientist',Groq:process.env.CURELAB_MODE!=='demo'?'Live provider':'Demo scientist'}}));
+installVoiceRoutes(app,lab,express);
 app.get('/api/missions',(req,res)=>res.json([...lab.missions.values()].map(s=>({id:s.id,question:s.question,phase:s.phase}))));
 app.post('/api/missions',(req,res)=>res.status(201).json(lab.create(z.string().trim().min(10).max(500).parse(req.body.question))));
 app.get('/api/missions/:id',(req,res)=>res.json(lab.snapshot(req.params.id)));
