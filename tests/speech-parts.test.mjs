@@ -1,0 +1,6 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {speechParts,playSpeechTurn} from '../src/speech-parts.mjs';
+test('long bilingual discussion is segmented without loss or broken surrogate pairs',()=>{const text='Please check viability. 请先检查细胞活性。🧪'.repeat(500);const parts=speechParts(text);assert.ok(parts.length>1);assert.equal(parts.join(''),text);assert.ok(parts.every(p=>p.length<=3500&&!/[\uD800-\uDBFF]$/.test(p)));assert.deepEqual(speechParts('Hello'),['Hello']);assert.deepEqual(speechParts(''),[]);});
+test('all segments play in order before the next scientist can start',async()=>{const events=[];await playSpeechTurn({request:async part=>{events.push(`request ${part}`);return new Response(new Uint8Array([part]),{headers:{'X-Speech-Parts':'3'}});},player:{play:async bytes=>events.push(`play ${new Uint8Array(bytes)[0]}`)},isCurrent:()=>true});assert.deepEqual(events,['request 0','play 0','request 1','play 1','request 2','play 2']);});
+test('interruption stops remaining segments and discards an in-flight response',async()=>{let current=true,requests=0,plays=0;await playSpeechTurn({request:async()=>{requests++;current=false;return new Response('audio',{headers:{'X-Speech-Parts':'2'}});},player:{play:async()=>plays++},isCurrent:()=>current});assert.equal(requests,1);assert.equal(plays,0);});

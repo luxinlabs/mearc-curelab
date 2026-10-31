@@ -1,6 +1,6 @@
 # CureLab — Staff Engineer System Design
 
-**Version:** 1.4 | **Date:** 2026-10-31
+**Version:** 1.5 | **Date:** 2026-10-31
 **Context:** YC Haunted Hacks 2026; first research mission is Type 2 Diabetes drug repurposing and β-cell function.  
 **Status:** Current implementation is described in §0. Sections 1–18 retain the broader target architecture; Terse actors and distributed guarantees there are future work.
 
@@ -21,6 +21,14 @@ flowchart LR
   API -->|Received peer context| GQ
   API --> SIM[Approved seeded synthetic assay]
 ```
+
+### Product showcase and voice reliability (2026-10-31)
+
+`/showcase.html` is a static, read-only product presentation: features, research workflow, actual technology integrations and a two-minute judging walkthrough. It does not provision VMs or invoke models. The judging criteria supplied in the event photo cover real-time AI/track technology, originality, execution, UX and impact (each 1–5). The demo should demonstrate a human intervention affecting subsequent replies and show genuine Relay receipts. Terse and OpenEvidence remain unconnected.
+
+The existing 3D viewer is retained. The proposed new gesture controls and broad workspace redesign are deferred at the user's request.
+
+Discussion narration now segments complete committed message text into at most 3,500-character parts. The server validates the requested part and returns its total in `X-Speech-Parts`; the browser fetches and plays each segment sequentially before advancing to the next scientist. Each segment rechecks pause and guidance revision. Interrupts cancel in-flight audio and remaining segments; updated human guidance stops older narration. Audio start failures reject correctly, and failed previews no longer announce success. Independent proposals remain silent; the UI explains the wait. The feature remains buffered turn-based speech, not full-duplex Realtime audio.
 
 ### Message path and responsibilities
 
