@@ -1,6 +1,6 @@
 # CureLab — Staff Engineer System Design
 
-**Version:** 1.3 | **Date:** 2026-10-31
+**Version:** 1.4 | **Date:** 2026-10-31
 **Context:** YC Haunted Hacks 2026; first research mission is Type 2 Diabetes drug repurposing and β-cell function.  
 **Status:** Current implementation is described in §0. Sections 1–18 retain the broader target architecture; Terse actors and distributed guarantees there are future work.
 
@@ -73,6 +73,7 @@ sequenceDiagram
 - `OPENAI_TTS_MODEL=gpt-4o-mini-tts` with `nova` (feminine-sounding) for OpenAI and `onyx` (masculine-sounding) for Groq; `OPENAI_TRANSCRIBE_MODEL=gpt-transcribe`. These are configurable independently from scientific model IDs. This is a turn-based Speech API implementation, with buffered MP3 playback and file transcription, **not a full-duplex Realtime session or hands-free VAD interruption**.
 - Pressing Speak stops playback immediately. Once microphone access succeeds, active discussion dispatch is paused durably. Already-running model requests may finish; they are not falsely described as canceled. Microphone tracks close after stopping, failure or navigation. Initial independent research continues during voice drafting so the sharing barrier cannot deadlock.
 - Submitting reviewed advice increments `guidanceRevision`, resumes dispatch and prioritizes a reply from both scientists. Every subsequent dispatched job receives all submitted human guidance. Replies retain the revision they used. Outputs from an earlier revision remain auditable but are not automatically spoken as current. Pausing while awaiting Relay also prevents subsequent model dispatch.
+- The voice controller persists across mission changes: it cancels old requests/recordings, resets the message queue and preserves user-enabled listening and the unlocked AudioContext. Successful previews enable listening but never release a durable human pause. Explicit Listen/Resume selects the latest eligible turn from each scientist. The UI distinguishes audio enabled from discussion paused.
 - Up to three explicitly requested additional discussion rounds run while listening. There is no unbounded autonomous voice loop. Stop audio ends local narration/automatic round scheduling; Resume without a note releases a durable human pause.
 - Transcription does not submit advice by itself. Human advice does not approve, modify or execute an experiment. Immutable protocol approval is unchanged. An uploaded recording is processed in memory (8 MB cap); audio is not stored as a research artifact. Transcript text is persisted only after human submission; activity logs record audio request IDs and message IDs.
 - The browser requires microphone permission and localhost/HTTPS. Capability failures remain visible and text entry stays available. Per-session audio requests are serialized; disconnects abort upstream requests.
