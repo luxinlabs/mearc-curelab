@@ -1,0 +1,121 @@
+# mearc-curelab
+
+A local research laboratory for two independent scientist workers, an interactive 3D pancreatic islet, and reproducible virtual experiments.
+
+## Run
+
+Requires **Node.js 24+** (uses built-in `node:sqlite`). Dependencies are already installed in this workspace.
+
+```sh
+npm install
+npm run dev
+```
+
+Open **http://localhost:3000**. For a production build:
+
+```sh
+npm run build
+npm start
+```
+
+The server binds only to `127.0.0.1`. `PORT` defaults to 3000. Do not expose this local single-user prototype to a public network. State lives in `data/curelab.sqlite`; content-addressed result artifacts live in `data/artifacts/`. Set `CURELAB_DATA_DIR` to move storage. Restarting preserves committed missions, protocol approvals, jobs, messages, checkpoints, and results.
+
+## Demo flow
+
+1. **Start investigation.** OpenAI and Groq run in separate Node processes. Each first-pass report is private until both are committed. In explicitly selected demo mode these reports are explicitly scripted, not AI-generated.
+2. Inspect both proposals and their cross-critiques in the **Research room**. Send a note to both scientists after the independence barrier opens.
+3. Explore the **3D islet**, **Single cell**, and **Signaling** tabs. Drag to orbit, scroll to zoom, click a cell, select a cell type using the accessible legend, pause animation, or toggle transparent membranes. This is procedural illustrative geometry, not reconstructed tissue or a predictive biological model.
+4. Review or revise the protocol. **Approve the exact version**, then **Run experiment**. Glucose, dose, seed, and replicate count affect the synthetic output. Changing the visual preview does not silently mutate an approved protocol; save a new version in the protocol dialog.
+5. During an assay, press **Stop worker** for OpenAI. This sends SIGKILL to the actual scientist process; the experiment worker is independent. Groq continues its review. **Resume worker** starts a new process and processes pending evidence.
+6. Inspect the assay plate, simulated response curves, viability QC, control variation, and SHA-256 artifact. Repeating the same run command ID returns the existing run. Create a new approved protocol version to repeat an assay.
+7. Once both scientists review the result, **Create Scientific PR**. It retains critiques and limitations. Accept the research record or request replication; export the full research bundle and audit trail as JSON.
+
+## Connect real providers
+
+Copy `.env.example` to `.env`, set `CURELAB_MODE=live`, and supply **both** provider API keys and explicit model names available to your accounts:
+
+```dotenv
+CURELAB_MODE=live
+OPENAI_API_KEY=...
+OPENAI_MODEL=...
+GROQ_API_KEY=...
+GROQ_MODEL=...
+```
+
+Restart the server and create a new mission. Set CURELAB_MODE=demo explicitly to use scripted examples. No provider calls are made in demo mode, even if an API key is already in the environment. Live mode refuses to start a mission unless both providers and model names are configured. Provider errors appear in the research room and do not silently fall back to scripted messages. Resume retries a failed job. Response request IDs and model names are retained. API keys remain server-side.
+
+OpenAI uses the [Responses endpoint](https://developers.openai.com/api/reference/resources/responses/methods/create); Groq uses [OpenAI-compatible chat completions](https://console.groq.com/docs/openai). Each process receives its own initial context; peer proposals are supplied only for cross-review. The application makes a bounded initial investigation, cross-review, and result-review call per scientist, plus one call per PI note. Actual provider execution has not been verified without configured credentials.
+
+## Scientific and integration scope
+
+- The executable scientific pipeline is **a deterministic synthetic assay**, not a public-data reanalysis or physical wet-lab experiment. Its assumptions are encoded explicitly in `server/simulator.mjs`. A positive result validates software behavior, not a candidate therapy.
+- Source cards link to GSE81608, GSE41762, and ChEMBL as **proposed sources**. No datasets have been downloaded or analyzed. They are not falsely labeled as evidence-backed findings.
+- Charts show model-generated temporal curves. Approximate intervals describe synthetic replicate noise; they are not biological confidence estimates. The cell-signaling network does not provide inferred probabilities.
+- **Agent Relay and Terse are not connected or implemented as the active runtime.** This local implementation uses real IPC worker messaging plus SQLite durability. It does not satisfy the sponsor-integration acceptance criteria in the original system design. See `IMPLEMENTATION_STATUS.md` for the remaining work. Provider credentials alone do not enable those sponsor services.
+- Local human control uses a per-server session token and same-origin mutation checks. This is not multi-user authentication or production RBAC.
+- A replication request is persisted as a review decision; it does not automatically execute another experiment. Create and approve a new protocol to run the next iteration.
+
+## Validation
+
+```sh
+npm test
+npm run build
+```
+
+The tests cover deterministic output, changed inputs, QC failure, exact-version approval, command idempotency, content hashes, independent-first-pass privacy, actual process kill/restart, continuation while one scientist is offline, both result reviews, PR generation, and restoration of an active run after orchestrator restart.
+
+In the implementation environment the production build and worker/workflow tests passed. A listening preview server was denied by sandbox networking, and the browser tool failed to initialize; visual browser QA and real provider calls remain unverified.
+
+## Structure
+
+- `src/App.jsx`: mission, research room, protocol editor/reviewer, assay results, evidence, PR and audit UI.
+- `src/CellScene.jsx`: procedural Three.js cell models, selection, orbit controls and illustrative signal particles.
+- `server/lab.mjs`: durable orchestration, independent barrier, worker lifecycle, immutable approval, run idempotency and reviews.
+- `server/store.mjs`: SQLite snapshots and transactional append-only audit records.
+- `server/agent-worker.mjs`: separate OpenAI / Groq provider adapters and explicit demo behavior.
+- `server/experiment-worker.mjs`: independently executing, checkpointed simulation worker.
+- `server/simulator.mjs`: seeded synthetic measurements, curves, summaries and QC.
+- `server/app.mjs`: local API, session authorization and SSE.
+- `server/index.mjs`: application startup and frontend server.
+
+## Research desk and provider update
+
+New missions use OpenAI + Groq. Existing missions retain their historical providers (as read-only historical records). Configure GROQ_API_KEY and GROQ_MODEL, restart, and create a new mission to use Groq.
+
+The human research desk starts a mission from a question, sends follow-up requests to both scientists after the independence barrier, and extracts explicitly stated dose/glucose/well/seed values into the reviewable protocol form. It is a deterministic parameter helper, not an LLM planner. Responses appear in the desk and full research room. No chat message bypasses experiment approval.
+
+The execution trace displays real persisted job phases, statuses, completed task counts, process IDs, and the current sharing barrier. Transport remains local IPC with SQLite persistence; Agent Relay is not installed or active.
+
+## OpenEvidence access review — October 31, 2026
+
+The official enterprise page (https://portal.openevidence.com/) documents institutional integration and limits eligibility to patient-care organizations supporting verified U.S. clinicians. A public developer authentication/endpoint contract could not be verified. The apparent API policy URL returned HTTP 403. No unofficial scraper or invented API was added.
+
+For now, a researcher can use their authorized OpenEvidence access separately and share original paper identifiers/citations with the scientists through the research desk. Those references still require independent verification and do not become observed measurements. Programmatic access requires confirming an approved integration with OpenEvidence; the product currently has no OpenEvidence connector.
+
+## Live chat correction
+
+The project `.env` now selects live mode. Startup explicitly loads the project provider settings so inherited shell keys do not override the keys configured for CureLab. Demo replies are used only when `CURELAB_MODE=demo` is explicitly selected. Active providers are OpenAI and Groq; Anthropic execution was removed. Historical missions with other providers are not resumed; startup creates a current-provider mission when the latest saved mission uses legacy providers. Historical message authors remain unchanged.
+
+The chat header displays runtime mode and configured models. The parameter-draft helper is still deterministic, but scientist chat replies in live mode are generated by provider APIs. Provider adapter tests verify endpoint, key/model routing, human input, and no fallback after errors using mocked HTTP responses. These are not live account/credit checks. Restart the backend after changing configuration.
+
+## Freestyle agent VMs and observability
+
+Set `CURELAB_RUNTIME=freestyle` and `FREESTYLE_API_KEY` in `.env`. Each mission/provider gets a dedicated VM slug (`curelab-<mission>-openai` and `curelab-<mission>-groq`). The adapter uses the documented Freestyle v5 REST API. It reuses matching slugs, configures outbound network access without inbound public services, installs Node.js if needed, and uploads only trusted worker code. Only the relevant model provider key is passed to each VM through the execution environment; the Freestyle master key stays in the orchestrator. VMs have a 600-second idle pause setting. Stop requests pause the VM; no destructive delete operation is used.
+
+Agent jobs execute inside their respective VMs. The local orchestrator polls structured JSONL task events every 1.5 seconds and streams committed updates to the frontend. Persisted remote cursors and per-job file locks reconcile completed jobs after restarts. An interrupted, incomplete provider call may need a retry; exactly-once provider billing is not guaranteed. VMs persist independently of the browser. Check the Freestyle dashboard for compute state and billing; a failed pause is explicitly reported.
+
+The Agent Observatory shows per-agent runtime identity, job events, model request/response IDs, failures, and literature retrieval. It shows the latest 300 mission activity events; the full persisted audit is included in research export. These are observable task/tool events, not hidden model reasoning or an interactive general-purpose shell terminal.
+
+In live proposal generation, each scientist searches Europe PMC for up to three paper records and supplies available abstracts to its model. The reading desk records title, authors, year, source URL, abstract SHA-256 and status. Metadata-only, retrieved abstract and abstract supplied to model are distinct. No full-text reading or scientific validation is claimed. Retrieval failures remain visible and do not fabricate sources. Demo mode does not fetch papers.
+
+**Verification status:** The initial Freestyle signup-risk restriction was subsequently lifted. Two real VMs were created for mission T2D-36e63410. Trusted workers executed successfully in each VM; OpenAI `gpt-5.4` and Groq `openai/gpt-oss-120b` both returned real provider responses with request IDs. Each VM also retrieved three Europe PMC abstracts in a separate literature-tool check. These were connectivity/tool checks, not scientific investigations. The sanitized verification record is stored in `data/runtime-verification.json` and displayed in the observatory with its timestamp. The full browser-driven research workflow on the remote runtime remains to be visually verified.
+
+VMs are retained with a 600-second idle pause policy. The runtime will reuse them by slug for this mission; other missions provision separate VMs. Set `CURELAB_RUNTIME=local` explicitly to return to local workers.
+
+References: https://www.freestyle.sh/docs/vms and https://api.freestyle.sh/openapi.json .
+
+## Separate workspaces and shared conversation
+
+The shared discussion excludes independent proposals and result reports; those are shown inside each agent's expandable workspace. Each workspace, VM/job section, report, log section and paper desk can be folded independently. Basic Markdown formatting is rendered as safe React elements, never raw HTML.
+
+After independently committing proposals, each scientist sends a peer-addressed critique. Both then receive the other scientist's specific critique and send a reply referencing its message ID. Only after that bounded exchange is the initial protocol presented for approval. “Continue agent discussion” requests one additional exchange using the latest peer message, without executing experiments. Duplicate pending rounds are rejected. The local orchestrator routes these messages between the separate Freestyle workers; the shared UI is not a third model or an additional VM. Existing report authors and content are preserved. Restart the backend to upload the updated worker code when VMs reconnect.

@@ -1,0 +1,5 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {findPapers} from '../server/literature.mjs';
+test('paper provenance distinguishes abstracts from metadata-only results',async()=>{const events=[];const papers=await findPapers('beta cell',e=>events.push(e),async url=>{assert.equal(url.hostname,'www.ebi.ac.uk');assert.equal(url.searchParams.get('pageSize'),'3');return {ok:true,json:async()=>({resultList:{result:[{id:'1',source:'MED',title:'Study',abstractText:'<p>Observed findings</p>'},{id:'2',source:'MED',title:'No abstract'}]}})};});assert.equal(papers.length,2);assert.equal(papers[1].abstract,'');assert.equal(papers[0].scope,'abstract_only');assert.match(papers[0].contentSha256,/^[a-f0-9]{64}$/);assert.equal(events.filter(e=>e.event==='PAPER_RETRIEVED').length,2);assert.ok(!events.some(e=>e.event.includes('READ')));});
+test('failed literature requests do not fabricate paper results',async()=>{await assert.rejects(findPapers('test',()=>{},async()=>({ok:false,status:503})),/503/);});
