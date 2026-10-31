@@ -172,3 +172,7 @@ Discussion-audio controls now show AUDIO ON/OFF or DISCUSSION PAUSED explicitly.
 Open [the product showcase](http://localhost:3000/showcase.html) while the app is running, or use **Project showcase** in the workspace header. Source: `public/showcase.html`. The read-only page describes implemented features and integrations, plus a two-minute walkthrough mapped to the supplied Haunted Hacks judging criteria. Design follows the [UI/UX Pro Max skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill): clear hierarchy, responsive cards, keyboard focus, reduced motion and explicit integration status. New cell gesture controls and the broad workspace redesign are deferred.
 
 Shared turns are now summarized into **one or two short spoken sentences**; full messages stay in chat and remain the scientists’ peer context. A separate OpenAI Responses call uses the configured `OPENAI_MODEL` to preserve the key point, next step and uncertainty. Summaries are length-validated, cached in a bounded server-memory cache and recorded with request IDs in the voice audit event. Failures are surfaced instead of falling back to lengthy narration. OpenAI keeps `nova`, Groq keeps `onyx`. Restart the backend and refresh the page to apply this change.
+
+## Presentation
+
+See [the 2–3 minute β-cell demo script](docs/DEMO_SCRIPT.md) for the specific 10 µM / 11 mM / 24-well case, an exact voice intervention, a two-minute core script and an optional extension. The script distinguishes live interaction from previously completed synthetic experiments.
