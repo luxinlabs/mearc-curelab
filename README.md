@@ -159,3 +159,8 @@ Voice APIs are disabled in demo mode. Keys stay on the server; recorded audio is
 **Audio model lifecycle:** OpenAI has scheduled the Speech API TTS models to retire on January 6, 2027. This verified hackathon implementation uses that still-supported endpoint. Migrate synthesis to the Realtime API before that date; `gpt-realtime-2.1-mini` cannot be substituted into `/audio/speech`. See [official speech documentation](https://developers.openai.com/api/docs/guides/text-to-speech).
 
 Voice playback is unlocked on the Listen/Test voice click before the synthesis request begins, avoiding delayed autoplay blocking. Use each scientist’s **Test voice** button to check output without starting research. The selected mapping is OpenAI → `nova` (feminine-sounding), Groq → `onyx` (masculine-sounding). Restart the backend after changing voice configuration, then refresh the page.
+
+
+## Experiment result charts
+
+The Laboratory and Experiments pages now include a result explorer alongside the existing time-course chart. Switch between group means (stored secretion uncertainty intervals), well distributions (quartiles and all observations), secretion-versus-viability scatter, and a full-well heatmap. Select an earlier experiment version, click a point or heatmap tile for exact measurements, or open the accessible data table. Download the selected SVG chart or all wells as CSV. Every view is explicitly simulated; the 80% scatter reference is distinct from the group-mean viability QC rule. No dose-response series is inferred from a single-dose experiment.

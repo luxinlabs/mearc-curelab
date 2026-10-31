@@ -1,6 +1,6 @@
 # CureLab — Staff Engineer System Design
 
-**Version:** 1.2 | **Date:** 2026-10-31
+**Version:** 1.3 | **Date:** 2026-10-31
 **Context:** YC Haunted Hacks 2026; first research mission is Type 2 Diabetes drug repurposing and β-cell function.  
 **Status:** Current implementation is described in §0. Sections 1–18 retain the broader target architecture; Terse actors and distributed guarantees there are future work.
 
@@ -78,6 +78,18 @@ sequenceDiagram
 - The browser requires microphone permission and localhost/HTTPS. Capability failures remain visible and text entry stays available. Per-session audio requests are serialized; disconnects abort upstream requests.
 
 Compatibility note: official OpenAI documentation schedules the Speech API TTS models for shutdown on **2027-01-06** and directs migration to `gpt-realtime-2.1-mini` over Realtime. That migration requires a new transport implementation, not merely changing the model string on `/audio/speech`. The current hackathon integration uses the verified, still-operational Speech API. References: [speech](https://developers.openai.com/api/docs/guides/text-to-speech), [transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
+
+### Experiment result explorer (implemented)
+
+The React result explorer reads committed `experiment.result` objects without modifying simulation outputs or protocol state. It supports completed and failed runs that have committed measurements, including historical protocol versions. Empty/pending runs never display invented results.
+
+- Group bars use stored means. Secretion error bars use stored approximate 95% intervals; viability shows means only.
+- Distribution plots calculate interpolated quartiles from all wells; whiskers show the full range, and every well is plotted with deterministic decorative horizontal spacing.
+- Scatter plots use per-well insulin and viability. The 80% line is a reference; the backend QC rule uses group means.
+- Heatmaps show every well in logical condition groups, not inferred physical plate coordinates. The original plate panel also shows all wells with condition-correct colors instead of truncating at 24.
+- Readout selectors, well inspection and an accessible exact-value table accompany charts. SVG export captures the displayed statistical chart; CSV exports all wells with units in headers. The existing time-series chart remains available.
+
+Tests verify quartile interpolation, inclusion of all 96 wells at maximum replicate count, and CSV escaping. All axes, intervals, captions and exports retain synthetic-data labeling. No clinical uncertainty, efficacy or unmeasured dose-response curve is claimed.
 
 ## 1. Executive summary
 
